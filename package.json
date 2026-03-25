@@ -14,6 +14,14 @@
     "typescript"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/textura-agency/spring-text-engine.git"
+  },
+  "homepage": "https://textengine.textura.agency",
+  "bugs": {
+    "url": "https://github.com/textura-agency/spring-text-engine/issues"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",

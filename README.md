@@ -4,6 +4,8 @@ A scroll-aware, spring-animated text component built on [react-spring](https://r
 
 Splits `children` into letter / word / line animation slots and drives them with independent springs. Mixed children are fully supported — plain strings animate alongside React elements (`<span>`, `<strong>`, etc.), and non-text elements (SVGs, icons, components) are treated as a single animated word unit.
 
+**[Documentation & Playground →](https://textengine.textura.agency)** · [GitHub](https://github.com/textura-agency/spring-text-engine)
+
 ---
 
 ## Table of contents
