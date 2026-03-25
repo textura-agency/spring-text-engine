@@ -75,8 +75,10 @@ export const interpolate = (start: { [key: string]: any }, end: { [key: string]:
 
         if (startVal.unit !== null || endVal.unit !== null) {
             const unit = startVal.unit || endVal.unit;
-            if (unit?.includes('(')) { // Check if it's any CSS transform function
-                result[key] = `${unit.split('(')[0]}(${lerp(startVal.number, endVal.number, progress)}${unit.split(')')[0].slice(unit.split('(')[0].length)})`;
+            if (unit?.includes('(')) { // CSS function e.g. blur(px), rotate(deg)
+                const funcName = unit.split('(')[0]
+                const cssUnit = unit.slice(funcName.length + 1, unit.length - 1)
+                result[key] = `${funcName}(${lerp(startVal.number, endVal.number, progress)}${cssUnit})`;
             } else {
                 result[key] = `${lerp(startVal.number, endVal.number, progress)}${unit}`;
             }
