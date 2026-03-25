@@ -1,6 +1,6 @@
 {
   "name": "spring-text-engine",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scroll-aware, spring-animated text component for React. Splits children into letter/word/line animation slots driven by react-spring.",
   "keywords": [
     "react",

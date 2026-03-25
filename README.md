@@ -1,4 +1,4 @@
-# TextEngine
+ # TextEngine
 
 A scroll-aware, spring-animated text component built on [react-spring](https://react-spring.dev/).
 
@@ -172,7 +172,6 @@ All optional `SpringConfig` objects. The shared config applies to both in and ou
 | Prop | Default | Description |
 |------|---------|-------------|
 | `seo` | `true` | Renders a visually-hidden plain-text copy so crawlers and screen readers see unsplit content |
-| `showSeoText` | `false` | Renders the SEO copy in red for debugging |
 
 ### CSS class hooks
 

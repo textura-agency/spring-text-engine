@@ -136,8 +136,6 @@
  * ─── SEO ─────────────────────────────────────────────────────────────────────
  * @param {boolean} [seo=true]          - Renders a visually-hidden copy of the
  *   full text so crawlers and screen readers see the unsplit content.
- * @param {boolean} [showSeoText=false] - Debug flag: renders the SEO copy in
- *   red so you can verify its position.
  *
  * ─── CSS class hooks ─────────────────────────────────────────────────────────
  * @param {string} [className]           - Container element class.
@@ -179,6 +177,8 @@ import {
   Children,
   Fragment,
   ReactElement,
+  isValidElement,
+  cloneElement,
 } from "react";
 import {
   AnimationResult,
@@ -362,7 +362,6 @@ export interface EngineProps extends HTMLAttributes<HTMLSpanElement> {
 
   enableInOutDelayesOnRerender?: boolean;
   seo?: boolean;
-  showSeoText?: boolean;
 
   onTextEngine?: (instance: RefObject<TextEngineInstance>) => void;
   onTextStart?: TextEngineHandlerType;
@@ -437,8 +436,7 @@ const TextEngine = memo(
         delayIn={props.delayIn || 0}
         delayOut={props.delayOut || 0}
         tag={props.as || props.tag || "span"}
-        seo={props.seo || false}
-        showSeoText={props.showSeoText || false}
+        seo={props.seo ?? true}
         immediateOut={props.immediateOut || true}
         enableInOutDelayesOnRerender={
           props.enableInOutDelayesOnRerender || false
@@ -544,7 +542,6 @@ const Engine = forwardRef(
       enableInOutDelayesOnRerender = false,
       // If true, add additional text with the same content but without animation, and use it for SEO and copy
       seo = true,
-      showSeoText = false,
 
       // Callbacks
       onTextEngine = () => {},
@@ -599,6 +596,29 @@ const Engine = forwardRef(
         return acc;
       }, 0),
     [tokens]);
+    // Word-slot indices that correspond to NodeTokens — used to apply letter-animation
+    // fallback when word targets are empty but letter targets are set.
+    // lettersBefore: number of text characters preceding this node in the token stream,
+    // so the node gets the correct stagger position within the letter sequence.
+    const nodeTokenWordIndices = useMemo(() => {
+      const result: { wordIndex: number; lettersBefore: number }[] = [];
+      let wordIdx = 0;
+      let letterCount = 0;
+      tokens.forEach((t) => {
+        if (t.type === "node") {
+          result.push({ wordIndex: wordIdx, lettersBefore: letterCount });
+          wordIdx++;
+        } else if (t.type === "word") {
+          letterCount += t.chars.length;
+          wordIdx++;
+        } else if (t.type === "wrapper") {
+          t.words.forEach((w) => { letterCount += w.chars.length; wordIdx++; });
+        }
+      });
+      return result;
+    }, [tokens]);
+    const nodeTokenWordIndicesRef = useRef(nodeTokenWordIndices);
+    nodeTokenWordIndicesRef.current = nodeTokenWordIndices;
     const rerenderTimeout = useRef<any>(null);
     const rerendering = useRef(false);
 
@@ -830,6 +850,28 @@ const Engine = forwardRef(
       type, interpolationStaggerCoefficient,
     };
 
+    // When only letter targets are configured (no word targets), immediately place node
+    // token word springs into the letter "out" state so they start hidden/offset just
+    // like text letters do.
+    useEffect(() => {
+      const p = propsRef.current;
+      const nodeTokens = nodeTokenWordIndicesRef.current;
+      if (nodeTokens.length === 0) return;
+      const wordIndexSet = new Set(nodeTokens.map((n) => n.wordIndex));
+      if (isNotEmpty(p.wrapWordOut) || isNotEmpty(p.wrapLetterOut)) {
+        wrapWordApi.start((index: number) => {
+          if (!wordIndexSet.has(index)) return {};
+          return { ...p.wrapLetterOut, immediate: true };
+        });
+      }
+      if (isNotEmpty(p.wordOut) || isNotEmpty(p.letterOut)) {
+        wordApi.start((index: number) => {
+          if (!wordIndexSet.has(index)) return {};
+          return { ...p.letterOut, immediate: true };
+        });
+      }
+    }, [tokens, wrapWordApi, wordApi]);
+
     // Stable ref holding array lengths so the playProgress closure never goes stale
     // even when text or layout changes after mount (since useLoopInView captures at mount)
     const lengthsRef = useRef({ lines: lines.length, words: wordSlotCount, letters: letters.length });
@@ -1015,6 +1057,35 @@ const Engine = forwardRef(
             config: isNotEmpty(p.wordConfigOut) ? p.wordConfigOut : p.wordConfig,
             immediate: p.immediateOut,
           }));
+        // node token fallback: animate node token word slots with letter targets when word targets are empty
+        {
+          const nodeTokens = nodeTokenWordIndicesRef.current;
+          if (nodeTokens.length > 0) {
+            const nodeMap = new Map(nodeTokens.map((n) => [n.wordIndex, n.lettersBefore]));
+            if (!isNotEmpty(p.wrapWordOut) && isNotEmpty(p.wrapLetterOut)) {
+              wrapWordApi.start((index: number) => {
+                if (!nodeMap.has(index)) return {};
+                return {
+                  ...p.wrapLetterOut,
+                  delay: _delayOut(p.delayOut, p.letterDelayOut, nodeMap.get(index)! * (p.letterStaggerOut || p.letterStagger)),
+                  config: isNotEmpty(p.letterConfigOut) ? p.letterConfigOut : p.letterConfig,
+                  immediate: p.immediateOut,
+                };
+              });
+            }
+            if (!isNotEmpty(p.wordOut) && isNotEmpty(p.letterOut)) {
+              wordApi.start((index: number) => {
+                if (!nodeMap.has(index)) return {};
+                return {
+                  ...p.letterOut,
+                  delay: _delayOut(p.delayOut, p.letterDelayOut, nodeMap.get(index)! * (p.letterStaggerOut || p.letterStagger)),
+                  config: isNotEmpty(p.letterConfigOut) ? p.letterConfigOut : p.letterConfig,
+                  immediate: p.immediateOut,
+                };
+              });
+            }
+          }
+        }
         // letter
         isNotEmpty(p.wrapLetterOut) &&
           wrapLetterApi.start((index: number) => ({
@@ -1075,6 +1146,33 @@ const Engine = forwardRef(
             delay: _delayIn(p.delayIn, p.wordDelayIn, index * (p.wordStaggerIn || p.wordStagger)),
             config: isNotEmpty(p.wordConfigIn) ? p.wordConfigIn : p.wordConfig,
           }));
+        // node token fallback: animate node token word slots with letter targets when word targets are empty
+        {
+          const nodeTokens = nodeTokenWordIndicesRef.current;
+          if (nodeTokens.length > 0) {
+            const nodeMap = new Map(nodeTokens.map((n) => [n.wordIndex, n.lettersBefore]));
+            if (!isNotEmpty(p.wrapWordIn) && isNotEmpty(p.wrapLetterIn)) {
+              wrapWordApi.start((index: number) => {
+                if (!nodeMap.has(index)) return {};
+                return {
+                  ...p.wrapLetterIn,
+                  delay: _delayIn(p.delayIn, p.letterDelayIn, nodeMap.get(index)! * (p.letterStaggerIn || p.letterStagger)),
+                  config: isNotEmpty(p.letterConfigIn) ? p.letterConfigIn : p.letterConfig,
+                };
+              });
+            }
+            if (!isNotEmpty(p.wordIn) && isNotEmpty(p.letterIn)) {
+              wordApi.start((index: number) => {
+                if (!nodeMap.has(index)) return {};
+                return {
+                  ...p.letterIn,
+                  delay: _delayIn(p.delayIn, p.letterDelayIn, nodeMap.get(index)! * (p.letterStaggerIn || p.letterStagger)),
+                  config: isNotEmpty(p.letterConfigIn) ? p.letterConfigIn : p.letterConfig,
+                };
+              });
+            }
+          }
+        }
         // letter
         isNotEmpty(p.wrapLetterIn) &&
           wrapLetterApi.start((index: number) => ({
@@ -1160,7 +1258,7 @@ const Engine = forwardRef(
               ...{
                 overflow: overflow ? "hidden" : "initial",
                 display: "inline-block",
-                userSelect: seo ? "none" : "auto",
+                userSelect: "auto",
               },
             }}
             className={
@@ -1183,7 +1281,7 @@ const Engine = forwardRef(
             style={{
               display: "inline-block",
               ...lineSprings[wordIndex],
-              userSelect: seo ? "none" : "auto",
+              userSelect: "auto",
             }}
             className={lineClassName}
           >
@@ -1206,7 +1304,7 @@ const Engine = forwardRef(
               display: "inline-block",
               ...wrapWordSprings[wordIndex],
               ...{ overflow: overflow ? "hidden" : "initial" },
-              userSelect: seo ? "none" : "auto",
+              userSelect: "auto",
             }}
             className={wrapWordClassName}
           >
@@ -1227,7 +1325,7 @@ const Engine = forwardRef(
           <animated.span
             style={{
               display: "inline-block",
-              userSelect: seo ? "none" : "auto",
+              userSelect: "auto",
               ...wordSprings[wordIndex],
             }}
             className={wordClassName}
@@ -1249,7 +1347,7 @@ const Engine = forwardRef(
           <animated.span
             style={{
               display: "inline-block",
-              userSelect: seo ? "none" : "auto",
+              userSelect: "auto",
               ...wrapLetterSprings[letterIndex],
               ...{ overflow: overflow ? "hidden" : "initial" },
             }}
@@ -1272,7 +1370,7 @@ const Engine = forwardRef(
           <animated.span
             style={{
               display: "inline-block",
-              userSelect: seo ? "none" : "auto",
+              userSelect: "auto",
               ...letterSprings[letterIndex],
             }}
             className={letterClassName}
@@ -1323,30 +1421,60 @@ const Engine = forwardRef(
           {seo && (
             <span
               style={{
-                userSelect: "auto",
-                color: showSeoText ? "red" : "transparent",
+                // Visually hidden — accessible to screen readers and crawlers,
+                // invisible and non-interactive for sighted users.
                 position: "absolute",
-                left: 0,
-                top: 0,
-                width: "100%",
-                height: "100%",
+                width: "1px",
+                height: "1px",
+                padding: 0,
+                margin: "-1px",
+                overflow: "hidden",
+                clip: "rect(0,0,0,0)",
+                whiteSpace: "nowrap",
+                border: 0,
+                pointerEvents: "none",
+                userSelect: "none",
               }}
             >
-              {children}
+              {stripNonTextChildren(children)}
             </span>
           )}
+          {/* aria-hidden when seo=true: screen readers and crawlers use the SEO copy above.
+              display:contents keeps flex layout intact. */}
+          <span {...(seo ? { "aria-hidden": "true" } : {})} style={{ display: "contents" }}>
           {tokens.map((token, tokenIdx) => {
             if (token.type === "node") {
-              // Non-text element (SVG, img, component) — animated as a single word unit
+              // Non-text element (SVG, img, component) — animated as a single word unit.
+              // Falls back to letter targets when word targets are empty so that inline
+              // images/icons participate in letter-only animations.
               const wordIndex = wordSlotIdx++;
+              const nodeLetterFallback = !isNotEmpty(wordIn) && isNotEmpty(letterIn);
+              const nodeWrapLetterFallback = !isNotEmpty(wrapWordIn) && isNotEmpty(wrapLetterIn);
+              const inner = (isNotEmpty(wordIn) || nodeLetterFallback) ? (
+                <animated.span
+                  style={{ display: "inline-block", userSelect: "auto", ...wordSprings[wordIndex] }}
+                  className={wordClassName}
+                >
+                  {token.node}
+                </animated.span>
+              ) : token.node;
+              const wrapped = (isNotEmpty(wrapWordIn) || nodeWrapLetterFallback) ? (
+                <animated.span
+                  style={{
+                    display: "inline-block",
+                    ...wrapWordSprings[wordIndex],
+                    overflow: overflow ? "hidden" : "initial",
+                    userSelect: "auto",
+                  }}
+                  className={wrapWordClassName}
+                >
+                  {inner}
+                </animated.span>
+              ) : inner;
               return (
                 <WrapLine wordIndex={wordIndex} key={`node-${tokenIdx}`}>
                   <Line wordIndex={wordIndex}>
-                    <WrapWord wordIndex={wordIndex}>
-                      <Word wordIndex={wordIndex}>
-                        {token.node}
-                      </Word>
-                    </WrapWord>
+                    {wrapped}
                   </Line>
                 </WrapLine>
               );
@@ -1395,6 +1523,7 @@ const Engine = forwardRef(
               </WrapLine>
             );
           })}
+          </span>
         </>
       );
 
@@ -1537,6 +1666,26 @@ export function calcLinesRefs(containerRef: RefObject<any>) {
 
 export function isNotEmpty(obj: { [key: string]: any }): boolean {
   return Object.keys(obj).length > 0;
+}
+
+/**
+ * Recursively strips non-text nodes (img, svg, video, canvas, etc.) from React
+ * children so that the SEO copy only contains readable text content.
+ */
+function stripNonTextChildren(children: ReactNode): ReactNode {
+  const VISUAL_ONLY_TAGS = new Set(["img", "svg", "video", "canvas", "picture", "iframe"]);
+  return Children.map(children, (child) => {
+    if (child == null || typeof child === "boolean") return null;
+    if (typeof child === "string" || typeof child === "number") return child;
+    if (isValidElement(child)) {
+      if (VISUAL_ONLY_TAGS.has(child.type as string)) return null;
+      const nested = (child.props as any).children;
+      return nested != null
+        ? cloneElement(child as ReactElement<any>, {}, stripNonTextChildren(nested))
+        : child;
+    }
+    return null;
+  });
 }
 
 export default TextEngine;
