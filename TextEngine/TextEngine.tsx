@@ -877,6 +877,12 @@ const Engine = forwardRef(
     const lengthsRef = useRef({ lines: lines.length, words: wordSlotCount, letters: letters.length });
     lengthsRef.current = { lines: lines.length, words: wordSlotCount, letters: letters.length };
 
+    // Tracks last fired toggle state per item so springs are only triggered when the
+    // threshold is crossed, not re-started every scroll frame (which resets velocity
+    // to zero each time and makes the animation look like linear interpolation).
+    const toggleCacheRef = useRef<Map<string, boolean>>(new Map());
+    useEffect(() => { toggleCacheRef.current.clear(); }, [wordSlotCount, letters.length, lines.length]);
+
     // playProgress: drives spring animations based on a 0-1 progress value.
     // All prop reads go through propsRef/lengthsRef so this ref-wrapped function
     // is always up-to-date without needing to be recreated.
@@ -885,39 +891,60 @@ const Engine = forwardRef(
       const l = lengthsRef.current;
       _progress.current = progressValue;
 
-      const items: { api: SpringRef<any>; in: any; out: any; length: number; config?: SpringConfig }[] = [
-        { api: wrapLineApi, in: p.wrapLineIn, out: p.wrapLineOut, length: l.words, config: p.lineConfig },
-        { api: lineApi,     in: p.lineIn,     out: p.lineOut,     length: l.words, config: p.lineConfig },
-        { api: wrapWordApi, in: p.wrapWordIn, out: p.wrapWordOut, length: l.words, config: p.wordConfig },
-        { api: wordApi,     in: p.wordIn,     out: p.wordOut,     length: l.words, config: p.wordConfig },
-        { api: wrapLetterApi, in: p.wrapLetterIn, out: p.wrapLetterOut, length: l.letters, config: p.letterConfig },
-        { api: letterApi,   in: p.letterIn,   out: p.letterOut,   length: l.letters, config: p.letterConfig },
+      // Line layers — stagger by LINE index so all words on the same line animate together.
+      // (word-slot index must be mapped to lineIndex via linesRef, not used directly.)
+      const lineLayerItems: { api: SpringRef<any>; in: any; out: any; config?: SpringConfig; key: string }[] = [
+        { api: wrapLineApi, in: p.wrapLineIn, out: p.wrapLineOut, config: p.lineConfig, key: 'wl' },
+        { api: lineApi,     in: p.lineIn,     out: p.lineOut,     config: p.lineConfig, key: 'li' },
       ];
+      lineLayerItems.forEach((item) => {
+        if (!isNotEmpty(item.in)) return;
+        if (p.type === "toggle") {
+          // Only fire when threshold changes — avoids velocity-reset on every frame
+          item.api.current.forEach((ctrl, idx) => {
+            const lineIndex = linesRef.current.flat().find((e) => e.index === idx)?.lineIndex ?? 0;
+            const itemPos = l.lines > 1 ? lineIndex / l.lines : 0;
+            const next = _progress.current > itemPos;
+            const k = `${item.key}_${idx}`;
+            if (toggleCacheRef.current.get(k) === next) return;
+            toggleCacheRef.current.set(k, next);
+            ctrl.start(next ? { ...item.in, config: item.config } : { ...item.out, config: item.config });
+          });
+        } else {
+          item.api.start((index: number) => {
+            const lineIndex = linesRef.current.flat().find((e) => e.index === index)?.lineIndex ?? 0;
+            const itemPos = l.lines > 1 ? lineIndex / l.lines : 0;
+            const itemProgress = transformRange(_progress.current, itemPos - p.interpolationStaggerCoefficient, itemPos, 1, 0);
+            return { ...interpolate(item.in, item.out, itemProgress), config: item.config };
+          });
+        }
+      });
 
-      items.forEach((item) => {
-        isNotEmpty(item.in) &&
+      // Word/letter layers — stagger by word/letter index
+      const wordLetterItems: { api: SpringRef<any>; in: any; out: any; length: number; config?: SpringConfig; key: string }[] = [
+        { api: wrapWordApi,   in: p.wrapWordIn,   out: p.wrapWordOut,   length: l.words,   config: p.wordConfig,   key: 'ww' },
+        { api: wordApi,       in: p.wordIn,       out: p.wordOut,       length: l.words,   config: p.wordConfig,   key: 'wo' },
+        { api: wrapLetterApi, in: p.wrapLetterIn, out: p.wrapLetterOut, length: l.letters, config: p.letterConfig, key: 'wle' },
+        { api: letterApi,     in: p.letterIn,     out: p.letterOut,     length: l.letters, config: p.letterConfig, key: 'le' },
+      ];
+      wordLetterItems.forEach((item) => {
+        if (!isNotEmpty(item.in)) return;
+        if (p.type === "toggle") {
+          item.api.current.forEach((ctrl, idx) => {
+            const itemPos = item.length > 0 ? idx / item.length : 0;
+            const next = _progress.current > itemPos;
+            const k = `${item.key}_${idx}`;
+            if (toggleCacheRef.current.get(k) === next) return;
+            toggleCacheRef.current.set(k, next);
+            ctrl.start(next ? { ...item.in, config: item.config } : { ...item.out, config: item.config });
+          });
+        } else {
           item.api.start((index: number) => {
             const itemPos = item.length > 0 ? index / item.length : 0;
-
-            if (p.type === "toggle") {
-              return _progress.current > itemPos
-                ? { ...item.in,  config: item.config }
-                : { ...item.out, config: item.config };
-            }
-
-            // interpolate mode
-            const itemProgress = transformRange(
-              _progress.current,
-              itemPos - p.interpolationStaggerCoefficient,
-              itemPos,
-              1,
-              0
-            );
-            return {
-              ...interpolate(item.in, item.out, itemProgress),
-              config: item.config,
-            };
+            const itemProgress = transformRange(_progress.current, itemPos - p.interpolationStaggerCoefficient, itemPos, 1, 0);
+            return { ...interpolate(item.in, item.out, itemProgress), config: item.config };
           });
+        }
       });
     };
     // Wrap in a ref so the loop-mounted closure always calls the latest version
