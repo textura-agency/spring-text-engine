@@ -1,0 +1,50 @@
+{
+  "name": "spring-text-engine",
+  "version": "0.1.0",
+  "description": "Scroll-aware, spring-animated text component for React. Splits children into letter/word/line animation slots driven by react-spring.",
+  "keywords": [
+    "react",
+    "animation",
+    "text",
+    "scroll",
+    "spring",
+    "react-spring",
+    "text-animation",
+    "scroll-animation",
+    "typescript"
+  ],
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup && node scripts/add-use-client.mjs",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@react-spring/web": ">=9.0.0",
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0"
+  },
+  "dependencies": {
+    "resize-observer-polyfill": "^1.5.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}
