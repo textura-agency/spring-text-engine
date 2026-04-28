@@ -188,6 +188,7 @@ import {
   SpringRef,
   SpringValue,
   useInView,
+  useSpringRef,
   useSprings,
 } from "@react-spring/web";
 import { animated } from "@react-spring/web";
@@ -720,6 +721,13 @@ const Engine = forwardRef(
       [letters, lines, textWords, mode, enabled, innerEnabled, paused]
     );
 
+    // Expose the instance to the parent once on mount. Documented in the README
+    // and JSDoc, but the call site was missing — leaving manual-mode users
+    // unable to drive playIn / playOut / togglePause through the ref.
+    useEffect(() => {
+      onTextEngine(instance);
+    }, []);
+
     // For "manual" mode with progress: watch progress.current and call playProgress
     // useLoop captures the callback at mount, so we use playProgressRef to always call the latest version
     useLoopInView(
@@ -769,41 +777,60 @@ const Engine = forwardRef(
     const linesRef = useRef(lines);
     linesRef.current = lines;
 
-    const [wrapLineSprings, wrapLineApi] = useSprings(wordSlotCount, () => ({
-      ...wrapLineOut,
+    // Each useSprings is wired to its own SpringRef. With a `ref:` attached,
+    // useSprings' layout-phase re-fire takes the `ctrl.queue.push(update)`
+    // branch instead of `ctrl.start(update)` (see @react-spring/core useSprings),
+    // so the per-render re-issue never clobbers an in-flight imperative start.
+    // Without this, only spring index 0 (delay 0) animates — words/letters with
+    // staggered delays get cancelled by the next render's auto-start before
+    // their delay elapses. `from:` seeds the resting OUT state for first paint.
+    const wrapLineApi = useSpringRef();
+    const [wrapLineSprings] = useSprings(wordSlotCount, () => ({
+      ref: wrapLineApi,
+      from: { ...wrapLineOut },
       onStart: (result, ctrl) => onTextStart("lineWrap", result, ctrl),
       onResolve: (result, ctrl) => onTextResolve("lineWrap", result, ctrl),
       onChange: (result, ctrl) => onTextChange("lineWrap", result, ctrl),
     }));
-    const [lineSprings, lineApi] = useSprings(wordSlotCount, () => ({
-      ...lineOut,
+    const lineApi = useSpringRef();
+    const [lineSprings] = useSprings(wordSlotCount, () => ({
+      ref: lineApi,
+      from: { ...lineOut },
       onStart: (result, ctrl) => onTextStart("line", result, ctrl),
       onResolve: (result, ctrl) => onTextResolve("line", result, ctrl),
       onChange: (result, ctrl) => onTextChange("line", result, ctrl),
     }));
-    const [wrapWordSprings, wrapWordApi] = useSprings(wordSlotCount, () => ({
-      ...wrapWordOut,
+    const wrapWordApi = useSpringRef();
+    const [wrapWordSprings] = useSprings(wordSlotCount, () => ({
+      ref: wrapWordApi,
+      from: { ...wrapWordOut },
       onStart: (result, ctrl) => onTextStart("wordWrap", result, ctrl),
       onResolve: (result, ctrl) => onTextResolve("wordWrap", result, ctrl),
       onChange: (result, ctrl) => onTextChange("wordWrap", result, ctrl),
     }));
-    const [wordSprings, wordApi] = useSprings(wordSlotCount, () => ({
-      ...wordOut,
+    const wordApi = useSpringRef();
+    const [wordSprings] = useSprings(wordSlotCount, () => ({
+      ref: wordApi,
+      from: { ...wordOut },
       onStart: (result, ctrl) => onTextStart("word", result, ctrl),
       onResolve: (result, ctrl) => onTextResolve("word", result, ctrl),
       onChange: (result, ctrl) => onTextChange("word", result, ctrl),
     }));
-    const [wrapLetterSprings, wrapLetterApi] = useSprings(
+    const wrapLetterApi = useSpringRef();
+    const [wrapLetterSprings] = useSprings(
       letters.length,
       () => ({
-        ...wrapLetterOut,
+        ref: wrapLetterApi,
+        from: { ...wrapLetterOut },
         onStart: (result, ctrl) => onTextStart("letterWrap", result, ctrl),
         onResolve: (result, ctrl) => onTextResolve("letterWrap", result, ctrl),
         onChange: (result, ctrl) => onTextChange("letterWrap", result, ctrl),
       })
     );
-    const [letterSprings, letterApi] = useSprings(letters.length, () => ({
-      ...letterOut,
+    const letterApi = useSpringRef();
+    const [letterSprings] = useSprings(letters.length, () => ({
+      ref: letterApi,
+      from: { ...letterOut },
       onStart: (result, ctrl) => onTextStart("letter", result, ctrl),
       onResolve: (result, ctrl) => onTextResolve("letter", result, ctrl),
       onChange: (result, ctrl) => onTextChange("letter", result, ctrl),
